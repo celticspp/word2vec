@@ -71,17 +71,20 @@ void InitUnigramTable() {
 void ReadWord(char *word, FILE *fin, char *eof) {
   int a = 0, ch;
   while (1) {
+    //ch = fgetc_unlocked(fin);
     ch = getc_unlocked(fin);
     if (ch == EOF) {
       *eof = 1;
       break;
     }
+    // 回车符
     if (ch == 13) continue;
     if ((ch == ' ') || (ch == '\t') || (ch == '\n')) {
       if (a > 0) {
         if (ch == '\n') ungetc(ch, fin);
         break;
       }
+      // 换行符作为一个单独的word
       if (ch == '\n') {
         strcpy(word, (char *)"</s>");
         return;
@@ -138,6 +141,7 @@ int AddWordToVocab(char *word) {
     vocab = (struct vocab_word *)realloc(vocab, vocab_max_size * sizeof(struct vocab_word));
   }
   hash = GetWordHash(word);
+  // 线性散列处理哈希冲突
   while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
   vocab_hash[hash] = vocab_size - 1;
   return vocab_size - 1;
@@ -156,12 +160,14 @@ void SortVocab() {
   int a, size;
   unsigned int hash;
   // Sort the vocabulary and keep </s> at the first position
+  // 词频降序排列 
   qsort(&vocab[1], vocab_size - 1, sizeof(struct vocab_word), VocabCompare);
   for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
   size = vocab_size;
   train_words = 0;
   for (a = 0; a < size; a++) {
     // Words occuring less than min_count times will be discarded from the vocab
+    // 过滤低频词，词典只会从某个位置被截断
     if ((vocab[a].cn < min_count) && (a != 0)) {
       vocab_size--;
       free(vocab[a].word);
@@ -329,8 +335,10 @@ void ReadVocab() {
     ReadWord(word, fin, &eof);
     if (eof) break;
     a = AddWordToVocab(word);
+    // &c?
     fscanf(fin, "%lld%c", &vocab[a].cn, &c);
-    i++;
+    // 多余
+    // i++;
   }
   SortVocab();
   if (debug_mode > 0) {
@@ -703,9 +711,13 @@ int main(int argc, char **argv) {
   if ((i = ArgPos((char *)"-iter", argc, argv)) > 0) iter = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-min-count", argc, argv)) > 0) min_count = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-classes", argc, argv)) > 0) classes = atoi(argv[i + 1]);
+  // 训练语料词典，默认为1000，不够重新分配
   vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
+  // 存放训练语料中单词的postion/index
   vocab_hash = (int *)calloc(vocab_hash_size, sizeof(int));
+  // 指数预结算，[e^-6,e^6)
   expTable = (real *)malloc((EXP_TABLE_SIZE + 1) * sizeof(real));
+  // TODO: 是否要取i <= EXP_TABLE_SIZE?
   for (i = 0; i < EXP_TABLE_SIZE; i++) {
     expTable[i] = exp((i / (real)EXP_TABLE_SIZE * 2 - 1) * MAX_EXP); // Precompute the exp() table
     expTable[i] = expTable[i] / (expTable[i] + 1);                   // Precompute f(x) = x / (x + 1)

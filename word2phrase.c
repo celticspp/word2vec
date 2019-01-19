@@ -47,12 +47,14 @@ void ReadWord(char *word, FILE *fin, char *eof) {
       *eof = 1;
       break;
     }
+    // 回车符
     if (ch == 13) continue;
     if ((ch == ' ') || (ch == '\t') || (ch == '\n')) {
       if (a > 0) {
         if (ch == '\n') ungetc(ch, fin);
         break;
       }
+      // 换行符作为一个单独word
       if (ch == '\n') {
         //strcpy(word, (char *)"</s>");
         word[0] = '\n';

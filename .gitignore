@@ -1,10 +1,8 @@
 compute-accuracy
 distance
-text8
-text8.gz
-vectors.bin
 word-analogy
 word2phrase
 word2vec
 text8
 text8.gz
+*.bin
