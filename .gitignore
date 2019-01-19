@@ -1,0 +1,6 @@
+compute-accuracy
+distance
+*.bin
+word-analogy
+word2phrase
+word2vec
