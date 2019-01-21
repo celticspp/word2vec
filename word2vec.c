@@ -29,26 +29,48 @@ const int vocab_hash_size = 30000000;  // Maximum 30 * 0.7 = 21M words in the vo
 typedef float real;                    // Precision of float numbers
 
 struct vocab_word {
+  // 词频
   long long cn;
   int *point;
-  char *word, *code, codelen;
+  // 单词内容
+  char *word;
+  char *code;
+  char codelen;
 };
-
-char train_file[MAX_STRING], output_file[MAX_STRING];
-char save_vocab_file[MAX_STRING], read_vocab_file[MAX_STRING];
+// 训练预料文件
+char train_file[MAX_STRING]; 
+// 输出文件，用于保存训练得到的词向量
+char output_file[MAX_STRING];
+// 保存词典的文件
+char save_vocab_file[MAX_STRING];
+// 读取词典的文件
+char read_vocab_file[MAX_STRING];
+// 词典
 struct vocab_word *vocab;
 int binary = 0, cbow = 1, debug_mode = 2, window = 5, min_count = 5, num_threads = 12, min_reduce = 1;
+// 词典hash表，用于获取单词的index
 int *vocab_hash;
-long long vocab_max_size = 1000, vocab_size = 0, layer1_size = 100;
+long long vocab_max_size = 1000, vocab_size = 0;
+// 词向量维数
+long long layer1_size = 100;
 long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0, classes = 0;
 real alpha = 0.025, starting_alpha, sample = 1e-3;
-real *syn0, *syn1, *syn1neg, *expTable;
+// 词向量矩阵，|V|*m维数组，m维词向量维数
+real *syn0;
+// 隐藏层到输出层权重矩阵
+real *syn1;
+// 
+real *syn1neg;
+// 预计算指数计算表
+real *expTable;
 clock_t start;
 
 int hs = 0, negative = 5;
 const int table_size = 1e8;
 int *table;
 
+// 基于单词的词频计算单词的采样概率，后面负采样会用到
+// 其中table存放的是单词索引
 void InitUnigramTable() {
   int a, i;
   double train_words_pow = 0;
@@ -77,10 +99,13 @@ void ReadWord(char *word, FILE *fin, char *eof) {
       *eof = 1;
       break;
     }
-    // 回车符
+    // 跳过回车符
     if (ch == 13) continue;
+    // 遇到分隔符
     if ((ch == ' ') || (ch == '\t') || (ch == '\n')) {
+      // 已读完一个单词
       if (a > 0) {
+        // 如果遇到换行符，回写该字符，换行符要作为一个单词
         if (ch == '\n') ungetc(ch, fin);
         break;
       }
@@ -143,12 +168,14 @@ int AddWordToVocab(char *word) {
   hash = GetWordHash(word);
   // 线性散列处理哈希冲突
   while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
+  // 保存当前单词的position
   vocab_hash[hash] = vocab_size - 1;
   return vocab_size - 1;
 }
 
 // Used later for sorting by word counts
 int VocabCompare(const void *a, const void *b) {
+  // 按词频降序排列
   long long l = ((struct vocab_word *)b)->cn - ((struct vocab_word *)a)->cn;
   if (l > 0) return 1;
   if (l < 0) return -1;
@@ -205,6 +232,7 @@ void ReduceVocab() {
     vocab_hash[hash] = a;
   }
   fflush(stdout);
+  // 提升低频词阈值，避免频繁re-hash
   min_reduce++;
 }
 
@@ -286,6 +314,7 @@ void LearnVocabFromTrainFile() {
     exit(1);
   }
   vocab_size = 0;
+  // 换行符加入词典第一位置
   AddWordToVocab((char *)"</s>");
   while (1) {
     ReadWord(word, fin, &eof);
@@ -293,15 +322,19 @@ void LearnVocabFromTrainFile() {
     train_words++;
     wc++;
     if ((debug_mode > 1) && (wc >= 1000000)) {
+      // 13为回车符，更新当前读取训练文件进度
       printf("%lldM%c", train_words / 1000000, 13);
       fflush(stdout);
       wc = 0;
     }
+    // 查找当前单词是否已经出现
     i = SearchVocab(word);
     if (i == -1) {
+      // 未出现加入词典
       a = AddWordToVocab(word);
       vocab[a].cn = 1;
     } else vocab[i].cn++;
+    // 词典大小超过阈值，需要缩减，以极少哈希冲突，提升查询效率
     if (vocab_size > vocab_hash_size * 0.7) ReduceVocab();
   }
   SortVocab();
@@ -334,8 +367,9 @@ void ReadVocab() {
   while (1) {
     ReadWord(word, fin, &eof);
     if (eof) break;
+    // a为当前单词position，即词vocab_size-1
     a = AddWordToVocab(word);
-    // &c?
+    // 从文件获取词频，c为换行符，参考SaveVocab函数
     fscanf(fin, "%lld%c", &vocab[a].cn, &c);
     // 多余
     // i++;
@@ -568,6 +602,7 @@ void TrainModel() {
   pthread_t *pt = (pthread_t *)malloc(num_threads * sizeof(pthread_t));
   printf("Starting training using file %s\n", train_file);
   starting_alpha = alpha;
+  // 第一次从训练预料里学习词典，如果有保存，后续可以直接加载，节省时间
   if (read_vocab_file[0] != 0) ReadVocab(); else LearnVocabFromTrainFile();
   if (save_vocab_file[0] != 0) SaveVocab();
   if (output_file[0] == 0) return;
@@ -588,17 +623,21 @@ void TrainModel() {
     }
   } else {
     // Run K-means on the word vectors
+    // 只迭代一次
     int clcn = classes, iter = 10, closeid;
     int *centcn = (int *)malloc(classes * sizeof(int));
     int *cl = (int *)calloc(vocab_size, sizeof(int));
     real closev, x;
     real *cent = (real *)calloc(classes * layer1_size, sizeof(real));
+    // 随机将单词分到K个簇
     for (a = 0; a < vocab_size; a++) cl[a] = a % clcn;
     for (a = 0; a < iter; a++) {
       for (b = 0; b < clcn * layer1_size; b++) cent[b] = 0;
       for (b = 0; b < clcn; b++) centcn[b] = 1;
+      // 将各个簇里的单词向量求和
       for (c = 0; c < vocab_size; c++) {
         for (d = 0; d < layer1_size; d++) cent[layer1_size * cl[c] + d] += syn0[c * layer1_size + d];
+        // 统计簇里的单词数
         centcn[cl[c]]++;
       }
       for (b = 0; b < clcn; b++) {
@@ -607,6 +646,7 @@ void TrainModel() {
           cent[layer1_size * b + c] /= centcn[b];
           closev += cent[layer1_size * b + c] * cent[layer1_size * b + c];
         }
+        // 归一化，保证|x|=1
         closev = sqrt(closev);
         for (c = 0; c < layer1_size; c++) cent[layer1_size * b + c] /= closev;
       }
@@ -615,6 +655,7 @@ void TrainModel() {
         closeid = 0;
         for (d = 0; d < clcn; d++) {
           x = 0;
+          // 计算余弦相似度
           for (b = 0; b < layer1_size; b++) x += cent[layer1_size * d + b] * syn0[c * layer1_size + b];
           if (x > closev) {
             closev = x;
@@ -713,7 +754,7 @@ int main(int argc, char **argv) {
   if ((i = ArgPos((char *)"-classes", argc, argv)) > 0) classes = atoi(argv[i + 1]);
   // 训练语料词典，默认为1000，不够重新分配
   vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
-  // 存放训练语料中单词的postion/index
+  // 存放单词的索引
   vocab_hash = (int *)calloc(vocab_hash_size, sizeof(int));
   // 指数预结算，[e^-6,e^6)
   expTable = (real *)malloc((EXP_TABLE_SIZE + 1) * sizeof(real));
