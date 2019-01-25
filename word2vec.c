@@ -31,10 +31,13 @@ typedef float real;                    // Precision of float numbers
 struct vocab_word {
   // 词频
   long long cn;
+  // 哈夫曼路径上经过的结点的索引
   int *point;
   // 单词内容
   char *word;
+  // 哈夫曼编码
   char *code;
+  // 哈夫曼编码长度
   char codelen;
 };
 // 训练预料文件
@@ -59,7 +62,7 @@ real alpha = 0.025, starting_alpha, sample = 1e-3;
 real *syn0;
 // 隐藏层到输出层权重矩阵
 real *syn1;
-// 
+// 负采样hidden->output权重矩阵
 real *syn1neg;
 // 预计算指数计算表
 real *expTable;
@@ -67,6 +70,7 @@ clock_t start;
 
 int hs = 0, negative = 5;
 const int table_size = 1e8;
+// 存放单词索引，用于按词频采样
 int *table;
 
 // 基于单词的词频计算单词的采样概率，后面负采样会用到
@@ -248,7 +252,8 @@ void CreateBinaryTree() {
   for (a = vocab_size; a < vocab_size * 2; a++) count[a] = 1e15;
   pos1 = vocab_size - 1;
   pos2 = vocab_size;
-  // Following algorithm constructs the Huffman tree by adding one node at a time
+  // Following algorithm constructs the Huffman tree by adding one node at a time'
+  // 词典已经按词频降序排列，参考sortVocab
   for (a = 0; a < vocab_size - 1; a++) {
     // First, find two smallest nodes 'min1, min2'
     if (pos1 >= 0) {
@@ -285,16 +290,22 @@ void CreateBinaryTree() {
     b = a;
     i = 0;
     while (1) {
+      // 0，1编码
       code[i] = binary[b];
+      // word结点索引
       point[i] = b;
       i++;
       b = parent_node[b];
+      // 根结点
       if (b == vocab_size * 2 - 2) break;
     }
     vocab[a].codelen = i;
+    // 中间结点共享词向量，保证索引从0开始
     vocab[a].point[0] = vocab_size - 2;
     for (b = 0; b < i; b++) {
+      // 编码反转，保证是从根节点遍历路径顺序
       vocab[a].code[i - b - 1] = code[b];
+      // TODO：这里会出现point索引<0?
       vocab[a].point[i - b] = point[b] - vocab_size;
     }
   }
